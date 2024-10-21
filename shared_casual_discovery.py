@@ -72,7 +72,6 @@ def find_solo_2cycles(edge_matrix, parent_list, children_list):
     else:
         return np.stack(solo_two_cycles, axis=0)
 def compute_C(adj_mat):
-    #cycles = compute_undirected_cycles(adj_mat) # we know compute_undirected_cycles is buggy
     cycles = find_undirected_cycles(adj_mat)
     n_cycles = len(cycles)
     edge_matrix = find_edges(adj_mat)
@@ -82,6 +81,7 @@ def compute_C(adj_mat):
         cycle = cycles[cycle_idx]
         n = len(cycle)
         edge_lists = [[] for j in range(n)]
+        edge_directions = [[] for j in range(n)] 
         for i in range(n):
             forward = np.array([cycle[i],cycle[(i+1) % n]])
             forward_loc = np.where(np.all(edge_matrix == forward, axis=1))[0]
@@ -89,15 +89,18 @@ def compute_C(adj_mat):
             backward_loc = np.where(np.all(edge_matrix == backward, axis=1))[0]
             if len(forward_loc) > 0:
                 edge_lists[i].append(forward_loc[0])
+                edge_directions[i].append(1)
             if len(backward_loc) > 0:
                 edge_lists[i].append(-backward_loc[0])
+                edge_directions[i].append(-1)
         dir_sub_cycles = [j for j in itertools.product(*edge_lists)]
-        for cycle in dir_sub_cycles:
+        cycle_directions = [j for j in itertools.product(*edge_directions)]
+        for cycle_idx, cycle in enumerate(dir_sub_cycles):
             n = len(cycle)
             temp_array = np.zeros((1,n_edges))
             for idx in range(n):
                 edge_idx = np.abs(cycle[idx])
-                edge_sgn = int(cycle[idx] / edge_idx)
+                edge_sgn = cycle_directions[cycle_idx][idx] #int(cycle[idx] / edge_idx)
                 temp_array[0,edge_idx] = edge_sgn
             dir_cycles.append(temp_array)
 
