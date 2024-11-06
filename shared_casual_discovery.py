@@ -486,7 +486,7 @@ def find_direction(df,
         fig.tight_layout()
         if save_fig:
             plt.savefig("vdos.pdf")
-        plt.show()
+        #plt.show()
         plt.close()
 
 
@@ -519,8 +519,8 @@ if __name__ == "__main__":
     loss, mw_hist, _ = out
 
     #############################################
-    # Sachs Problem
-    data_dir = "sachs_data/vdos_scalar_data"
+    # VDoS Problem
+    data_dir = "vdos_data/data"
     attr = ["comp_type", "disorder", "dpa", "max_peak", "peak_pos", "strain", "stress"]
     data = {att: np.load(os.path.join(data_dir, att+".npy")) for att in attr}
     data_df = pd.DataFrame.from_dict(data)
@@ -541,6 +541,6 @@ if __name__ == "__main__":
                        d1_weight = 1.0, lr = 2e-2,
                        rng_seed=7,
                        plots=True,
-                       save_fig=None
+                       save_fig=True
                       )
     loss, mw_hist, _ = out
