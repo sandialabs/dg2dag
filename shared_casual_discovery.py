@@ -81,7 +81,7 @@ def compute_C(adj_mat):
         cycle = cycles[cycle_idx]
         n = len(cycle)
         edge_lists = [[] for j in range(n)]
-        edge_directions = [[] for j in range(n)] 
+        edge_directions = [[] for j in range(n)]
         for i in range(n):
             forward = np.array([cycle[i],cycle[(i+1) % n]])
             forward_loc = np.where(np.all(edge_matrix == forward, axis=1))[0]
@@ -218,38 +218,70 @@ def solve_system(adj_matrix):
     DAG_edges = KKT_inv @ u
     return DAG_edges[:num_edges], DAG_edges[num_edges:]
 
+
+def get_activation_function(activation_function):
+    if activation_function == 'ReLU':
+        return nn.ReLU()
+    elif activation_function == 'Tanh':
+        return nn.Tanh()
+    elif activation_function == 'LeakyReLU':
+        return nn.LeakyReLU()
+    elif activation_function == 'Sigmoid':
+        return nn.Sigmoid()
+    else:
+        raise ValueError(f"Unsupported activation function: {activation_function}")
+
 class MLP(nn.Module):
-    def __init__(self, num_adj):
+    def __init__(self, num_adj,
+                 hidden_layer_width=100, hidden_layer_depth=3, activation_function='ReLU'):
         super(MLP, self).__init__()
-        layer_width = 100
-        self.fc0 = nn.Linear(num_adj, layer_width)
-        self.fc1 = nn.Linear(layer_width, layer_width)
-        self.fc2 = nn.Linear(layer_width, layer_width)
-        self.fc3 = nn.Linear(layer_width, 1)
-        self.act = nn.ReLU()
+        layers = []
+
+        # Input layer
+        input_dim = num_adj
+        for _ in range(hidden_layer_depth):
+            layers.append(nn.Linear(input_dim, hidden_layer_width))
+            layers.append(get_activation_function(activation_function))
+            input_dim = hidden_layer_width
+
+        # Output layer
+        layers.append(nn.Linear(input_dim, 1))
+        self.network = nn.Sequential(*layers)
+
     def forward(self, data):
-        out = self.act(self.fc0(data))
-        out = self.act(self.fc1(out))
-        out = self.act(self.fc2(out))
-        out = self.fc3(out)
-        return out
+        return self.network(data)
 
 
 class nodal_MLP(nn.Module):
-    def __init__(self, node_idx,num_adj, edge_matrix):
+    def __init__(self, node_idx, num_adj, edge_matrix,
+                 hidden_layer_width=100, hidden_layer_depth=3, activation_function='ReLU',
+                 debug=False):
         super(nodal_MLP, self).__init__()
         self.node = node_idx
         self.num_edges = len(edge_matrix)
         edge_directions, data_idx, weight_idx = self.edge_dir(node_idx, edge_matrix)
+
+        if debug:
+            print("#Nodal MLP################################################")
+            print(f"node={node_idx}: num_adj={num_adj}, num_edges={self.num_edges}")
+            print("\tedge_directions=", edge_directions)
+            print("\tdata_idx=", data_idx)
+            print("\tweight_idx=", weight_idx)
+            print("##########################################################")
+
         self.register_buffer('edge_directions', torch.tensor(edge_directions))
         self.register_buffer('data_idx', torch.tensor(data_idx))
         self.register_buffer('weight_idx', torch.tensor(weight_idx))
         self.num_adjs = num_adj
         self.MLP = MLP(self.num_adjs)
-        #print("Nodal MLP for node {} with {} adjacencies ".format(node_idx, num_adj))
-        #print("edge directions ", edge_directions)
-        #print("data idx", data_idx)
-        #print("weight idx", weight_idx)
+
+        self.MLP = MLP(
+            num_adj=self.num_adjs,
+            hidden_layer_width=hidden_layer_width,
+            hidden_layer_depth=hidden_layer_depth,
+            activation_function=activation_function
+        )
+
     def forward(self, data, weights):
         data_by_edge = []
         for idx in range(self.num_adjs):
@@ -260,6 +292,7 @@ class nodal_MLP(nn.Module):
         data_by_edge = torch.stack(data_by_edge, dim=-1)
         data_out = self.MLP(data_by_edge)
         return data_out
+
     def pretrain_forward(self, data, weights):
         data_by_edge = []
         for idx in range(self.num_adjs):
@@ -270,6 +303,7 @@ class nodal_MLP(nn.Module):
         data_by_edge = torch.stack(data_by_edge, dim=-1)
         data_out = self.MLP(data_by_edge)
         return data_out
+
     def edge_dir(self, node_idx, edge_matrix):
         edge_orientations = []
         data_idx = []
@@ -298,6 +332,7 @@ class Reconstruct(nn.Module):
         self.children_list = children_list
         self.edge_matrix = edge_matrix
         self.num_adj = [len(list(parent_list[j]) + list(children_list[j])) for j in range(self.num_nodes)]
+
         #weight parameters
         self.use_noise = use_noise
         weight_init, _ = solve_system(adj_matrix) # nearest DAG init
@@ -308,6 +343,7 @@ class Reconstruct(nn.Module):
         C = compute_C(adj_matrix)
         self.nullspace = null_space(C)
         self.d1 = torch.tensor(C)
+
         #MLPs
         MLPs = ModuleList() #for now, this assumes no isolated nodes
         for node_idx in range(self.num_nodes):
@@ -322,7 +358,7 @@ class Reconstruct(nn.Module):
                     data_out.append(self.MLPs[node_idx](data, self.weights + self.compute_noise()))
                 else:
                     data_out.append(self.MLPs[node_idx](data, self.weights))
-        data_out = torch.concat(data_out, dim=1) #check this is the right dimension
+        data_out = torch.cat(data_out, dim=1) #check this is the right dimension
         return data_out
     def pretrain_forward(self, data):
         #has_parents = self.compute_current_has_parents()
@@ -330,7 +366,7 @@ class Reconstruct(nn.Module):
         for node_idx in range(self.num_nodes):
             if self.num_adj[node_idx] > 0: #if there are adjacencies
                 data_out.append(self.MLPs[node_idx].pretrain_forward(data, self.weights))
-        data_out = torch.concat(data_out, dim=1) #check this is the right dimension
+        data_out = torch.cat(data_out, dim=1) #check this is the right dimension
         return data_out
     def compute_current_has_parents(self):
         current_edge_matrix = copy.deepcopy(self.edge_matrix)
@@ -348,7 +384,6 @@ class Reconstruct(nn.Module):
         has_parents = self.compute_current_has_parents()
         num_recon_nodes = data[:,has_parents].shape[-1]
         mse_loss = F.mse_loss(data[:, has_parents], data_out)
-        #DAG_loss = torch.abs(torch.sum(self.d1 @ self.weights))# this is wrong; doesn't enforce DAGS
         DAG_loss = torch.sum((self.d1 @ self.weights) ** 2)
         return mse_loss, DAG_loss, num_recon_nodes
     def compute_pretrain_loss(self, data, data_out):
@@ -362,8 +397,6 @@ class Reconstruct(nn.Module):
         noise = torch.normal(0,noise_level,size=(1,self.num_edges))
         proj_noise = torch.sum((noise @ self.nullspace) * self.nullspace, dim=1, keepdim=True)
         return proj_noise
-
-
 
 
 def pretrain(model, epochs, lrate, data_tensor):
